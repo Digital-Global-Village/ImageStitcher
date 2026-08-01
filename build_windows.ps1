@@ -2,13 +2,13 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 $env:PYINSTALLER_CONFIG_DIR = Join-Path $PSScriptRoot ".pyinstaller-cache"
 
-$python = Get-Command py -ErrorAction SilentlyContinue
+$python = Get-Command python -ErrorAction SilentlyContinue
 if ($python) {
-    $pythonArgs = @("-3")
-    $pythonCommand = "py"
-} else {
-    $pythonCommand = "python"
+    $pythonCommand = $python.Source
     $pythonArgs = @()
+} else {
+    $pythonCommand = "py"
+    $pythonArgs = @("-3")
 }
 
 & $pythonCommand @pythonArgs -m pip install -r requirements.txt
@@ -29,15 +29,16 @@ $pyInstallerArgs += "image_stitcher_gui.py"
 
 & $pythonCommand @pythonArgs @pyInstallerArgs
 
-$iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-if (-not $iscc) {
+$isccCommand = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+$isccPath = if ($isccCommand) { $isccCommand.Source } else { $null }
+if (-not $isccPath) {
     $defaultIscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
     if (Test-Path $defaultIscc) {
-        $iscc = Get-Item $defaultIscc
+        $isccPath = $defaultIscc
     }
 }
 
-if (-not $iscc) {
+if (-not $isccPath) {
     Write-Host ""
     Write-Host "Built portable app: dist\ImageStitcher\ImageStitcher.exe"
     Write-Host "Inno Setup 6 was not found, so the installer was not created."
@@ -46,7 +47,7 @@ if (-not $iscc) {
 }
 
 $version = (Get-Content "VERSION" -Raw).Trim()
-& $iscc.FullName "/DAppVersion=$version" "installer_windows.iss"
+& $isccPath "/DAppVersion=$version" "installer_windows.iss"
 
 New-Item -ItemType Directory -Force -Path "dist-windows" | Out-Null
 Copy-Item "Output\ImageStitcher-Setup.exe" "dist-windows\ImageStitcher-Setup.exe" -Force
