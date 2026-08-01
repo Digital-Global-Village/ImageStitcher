@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Packaging
+build/
+dist/
+dist-windows/
+*.spec
+*.dmg
+Output/
+.pyinstaller-cache/
+.build-meta/
+
+# Editors and macOS
+.DS_Store
+.idea/
+.vscode/
+
+# Local tests and optional private assets
+test_samples/

@@ -1,0 +1,58 @@
+name: Build Installers
+
+permissions:
+  contents: write
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: chmod +x build_app.sh build_dmg.sh
+      - run: ./build_dmg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ImageStitcher-macOS
+          path: ImageStitcher.dmg
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: choco install innosetup --no-progress -y
+      - run: .\build_windows.ps1
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ImageStitcher-Windows
+          path: dist-windows/ImageStitcher-Setup.exe
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ImageStitcher-*
+          path: release-artifacts
+          merge-multiple: true
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release-artifacts/* --repo "$GITHUB_REPOSITORY" --generate-notes --title "ImageStitcher $GITHUB_REF_NAME"
