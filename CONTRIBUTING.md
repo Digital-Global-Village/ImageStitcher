@@ -9,6 +9,8 @@ Thanks for helping improve ImageStitcher.
 3. Install dependencies with `python -m pip install -r requirements.txt`.
 4. Run the GUI with `python image_stitcher_gui.py`.
 
+Linux contributors also need `python3-tk`. Native drag-and-drop is supplied by `tkinterdnd2`; keep `hook-tkinterdnd2.py` in the repository so PyInstaller includes its platform libraries.
+
 ## Before Opening A Pull Request
 
 Run:

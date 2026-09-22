@@ -23,6 +23,7 @@ python3 -m PyInstaller \
   --windowed \
   --name ImageStitcher \
   --osx-bundle-identifier org.imagestitcher.app \
+  --additional-hooks-dir . \
   "${ICON_ARGS[@]}" \
   image_stitcher_gui.py
 

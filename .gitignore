@@ -8,11 +8,13 @@ venv/
 build/
 dist/
 dist-windows/
+dist-linux/
 *.spec
 *.dmg
 Output/
 .pyinstaller-cache/
 .build-meta/
+.local-archive/
 
 # Editors and macOS
 .DS_Store

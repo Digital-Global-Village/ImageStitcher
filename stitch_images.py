@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tif", ".tiff"}
+SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tif", ".tiff", ".pdf"}
 MAX_OUTPUT_PIXELS = 120_000_000
 MAX_OUTPUT_SIDE = 65_535
 UPSCALE_WARNING_FACTOR = 1.5
@@ -51,6 +51,7 @@ class PreparedImage:
     image: Any
     original_size: tuple[int, int]
     scale: float
+    display_name: str | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -92,6 +93,7 @@ def parse_args() -> argparse.Namespace:
         help="Optional gentle enhancement before stitching.",
     )
     parser.add_argument("--preview-info", action="store_true", help="Print estimated output details before saving.")
+    parser.add_argument("--pdf-dpi", type=int, default=150, help="PDF page render resolution, from 72 to 300 DPI.")
     return parser.parse_args()
 
 
@@ -119,17 +121,22 @@ def validate_paths(paths: Iterable[str]) -> list[Path]:
         if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
             fail(
                 f'Unsupported file type: "{path.name}". '
-                "Supported: jpg, jpeg, png, webp, heic, heif, tif, tiff."
+                "Supported: jpg, jpeg, png, webp, heic, heif, tif, tiff, pdf."
             )
         image_paths.append(path)
     return image_paths
 
 
-def load_source_images(paths: list[Path]) -> list[PreparedImage]:
+def load_source_images(paths: list[Path], pdf_dpi: int = 150) -> list[PreparedImage]:
     Image, UnidentifiedImageError = require_pillow()
+    if not 72 <= pdf_dpi <= 300:
+        fail("PDF DPI must be between 72 and 300.")
     loaded: list[PreparedImage] = []
 
     for path in paths:
+        if path.suffix.lower() == ".pdf":
+            loaded.extend(load_pdf_pages(path, pdf_dpi))
+            continue
         try:
             image = Image.open(path)
             image.load()
@@ -147,6 +154,78 @@ def load_source_images(paths: list[Path]) -> list[PreparedImage]:
         loaded.append(PreparedImage(path=path, image=rgba, original_size=rgba.size, scale=1.0))
 
     return loaded
+
+
+def load_pdf_pages(path: Path, dpi: int) -> list[PreparedImage]:
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        fail("PDF support is not installed. Run: python3 -m pip install -r requirements.txt")
+
+    try:
+        document = pdfium.PdfDocument(str(path))
+    except Exception as exc:
+        fail(f'Could not open PDF "{path.name}": {exc}')
+
+    pages: list[PreparedImage] = []
+    try:
+        count = len(document)
+        if count == 0:
+            fail(f'PDF "{path.name}" contains no pages.')
+        if count > 100:
+            fail(f'PDF "{path.name}" has {count} pages. The limit is 100 pages per PDF.')
+
+        scale = dpi / 72
+        estimated_pixels = 0
+        for index in range(count):
+            page = document[index]
+            try:
+                width, height = page.get_size()
+                pixel_width = max(1, round(width * scale))
+                pixel_height = max(1, round(height * scale))
+                if pixel_width > MAX_OUTPUT_SIDE or pixel_height > MAX_OUTPUT_SIDE:
+                    fail(f'Page {index + 1} in "{path.name}" is too large at {dpi} DPI.')
+                page_pixels = pixel_width * pixel_height
+                if page_pixels > 20_000_000:
+                    fail(f'Page {index + 1} in "{path.name}" would be too large at {dpi} DPI.')
+                estimated_pixels += page_pixels
+            finally:
+                page.close()
+
+        if estimated_pixels > 60_000_000:
+            fail(
+                f'PDF "{path.name}" would render {estimated_pixels:,} pixels at {dpi} DPI. '
+                "Use fewer pages or a lower --pdf-dpi value."
+            )
+
+        for index in range(count):
+            page = document[index]
+            try:
+                bitmap = page.render(scale=scale)
+                try:
+                    image = bitmap.to_pil().convert("RGBA")
+                    image.load()
+                finally:
+                    bitmap.close()
+                pages.append(
+                    PreparedImage(
+                        path=path,
+                        image=image,
+                        original_size=image.size,
+                        scale=1.0,
+                        display_name=f"{path.name} - page {index + 1} of {count}",
+                    )
+                )
+            finally:
+                page.close()
+    except StitchError:
+        raise
+    except Exception as exc:
+        fail(f'Could not render PDF "{path.name}": {exc}')
+    finally:
+        document.close()
+
+    return pages
 
 
 def parse_background(background: str) -> tuple[int, int, int, int]:
@@ -276,13 +355,19 @@ def prepare_images(images: list[PreparedImage], options: StitchOptions) -> tuple
         )
         if scale > UPSCALE_WARNING_FACTOR:
             warnings.append(
-                f'"{item.path.name}" is being enlarged to {scale:.1f}x. '
+                f'"{item.display_name or item.path.name}" is being enlarged to {scale:.1f}x. '
                 "It may look pixelated; use --no-upscale or a smaller target size."
             )
         enhanced = enhance_image(item.image, options.enhance)
         resized = resize_with_quality(enhanced, (new_width, new_height))
         prepared.append(
-            PreparedImage(path=item.path, image=resized, original_size=item.original_size, scale=scale)
+            PreparedImage(
+                path=item.path,
+                image=resized,
+                original_size=item.original_size,
+                scale=scale,
+                display_name=item.display_name,
+            )
         )
 
     return prepared, warnings
@@ -340,8 +425,8 @@ def cross_axis_offset(canvas_length: int, image_length: int, alignment: str) -> 
     return (canvas_length - image_length) // 2
 
 
-def stitch_images(paths: list[Path], options: StitchOptions) -> tuple[Any, list[str], tuple[int, int]]:
-    sources = load_source_images(paths)
+def stitch_images(paths: list[Path], options: StitchOptions, pdf_dpi: int = 150) -> tuple[Any, list[str], tuple[int, int]]:
+    sources = load_source_images(paths, pdf_dpi=pdf_dpi)
     prepared, warnings = prepare_images(sources, options)
     size = output_size(prepared, options)
     validate_output_size(*size)
@@ -380,20 +465,6 @@ def save_image(image: Any, output_path: str | None, options: StitchOptions) -> P
     return path.resolve()
 
 
-def print_preview_info(paths: list[Path], options: StitchOptions) -> list[str]:
-    sources = load_source_images(paths)
-    prepared, warnings = prepare_images(sources, options)
-    width, height = output_size(prepared, options)
-    validate_output_size(width, height)
-    print(f"Images: {len(paths)}")
-    print(f"Estimated output: {width} x {height}px")
-    print(f"Format: {options.output_format.upper()}")
-    print(f"Background: {options.background}")
-    for warning in warnings:
-        print(f"Warning: {warning}", file=sys.stderr)
-    return warnings
-
-
 def main() -> None:
     try:
         args = parse_args()
@@ -414,10 +485,18 @@ def main() -> None:
             alignment=args.align,
         )
 
-        if args.preview_info:
-            print_preview_info(paths, options)
+        sources = load_source_images(paths, pdf_dpi=args.pdf_dpi)
+        prepared, warnings = prepare_images(sources, options)
+        size = output_size(prepared, options)
+        validate_output_size(*size)
 
-        stitched, warnings, size = stitch_images(paths, options)
+        if args.preview_info:
+            print(f"Pages/images: {len(prepared)}")
+            print(f"Estimated output: {size[0]} x {size[1]}px")
+            print(f"Format: {options.output_format.upper()}")
+            print(f"Background: {options.background}")
+
+        stitched = stitch_prepared_images(prepared, options)
         for warning in warnings:
             print(f"Warning: {warning}", file=sys.stderr)
         saved_path = save_image(stitched, args.output, options)

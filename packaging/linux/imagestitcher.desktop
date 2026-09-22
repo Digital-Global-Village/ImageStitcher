@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ImageStitcher
+Comment=Stitch images horizontally or vertically
+Exec=imagestitcher
+Icon=imagestitcher
+Terminal=false
+Categories=Graphics;Utility;
+MimeType=image/jpeg;image/png;image/webp;image/tiff;

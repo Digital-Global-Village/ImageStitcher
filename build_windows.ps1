@@ -20,6 +20,7 @@ $pyInstallerArgs = @(
     "--clean",
     "--windowed",
     "--name", "ImageStitcher",
+    "--additional-hooks-dir", ".",
     "--version-file", ".build-meta\windows_version_info.txt"
 )
 if (Test-Path "icon.ico") {

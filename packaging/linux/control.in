@@ -1,0 +1,10 @@
+Package: imagestitcher
+Version: @VERSION@
+Section: graphics
+Priority: optional
+Architecture: @ARCH@
+Maintainer: ImageStitcher contributors
+Depends: libc6, libx11-6, libxext6, libxrender1, libxft2, libfontconfig1
+Description: Lightweight image stitching application
+ Stitch images horizontally or vertically with smart proportional resizing,
+ spacing, backgrounds, quality controls, preview, and drag-and-drop support.

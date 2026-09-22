@@ -16,6 +16,18 @@ from typing import Any
 
 from PIL import ImageTk
 
+from drag_drop import parse_drop_paths
+
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+
+    AppWindow = TkinterDnD.Tk
+    DRAG_AND_DROP_AVAILABLE = True
+except ImportError:
+    DND_FILES = None
+    AppWindow = tk.Tk
+    DRAG_AND_DROP_AVAILABLE = False
+
 from stitch_images import (
     PreparedImage,
     StitchError,
@@ -29,17 +41,18 @@ from stitch_images import (
     validate_output_size,
     validate_paths,
 )
+from version import __version__
 
 
 IMAGE_FILETYPES = [
-    ("Images", "*.jpg *.jpeg *.png *.webp *.heic *.heif *.tif *.tiff"),
+    ("Images and PDFs", "*.jpg *.jpeg *.png *.webp *.heic *.heif *.tif *.tiff *.pdf"),
     ("All files", "*.*"),
 ]
 PREVIEW_MAX_EDGE = 1800
 PREVIEW_MAX_PIXELS = 2_800_000
 
 
-class ImageStitcherApp(tk.Tk):
+class ImageStitcherApp(AppWindow):
     def __init__(self) -> None:
         super().__init__()
         self.title("ImageStitcher")
@@ -69,8 +82,10 @@ class ImageStitcherApp(tk.Tk):
 
         self.configure(background="#ececec")
         self.apply_mac_style()
+        self.create_menu()
         self.create_widgets()
         self.bind_shortcuts()
+        self.configure_drag_and_drop()
 
         dropped_or_opened = [Path(arg) for arg in sys.argv[1:] if Path(arg).exists()]
         if dropped_or_opened:
@@ -92,6 +107,68 @@ class ImageStitcherApp(tk.Tk):
         self.bind("<Command-s>", lambda _event: self.save_as())
         self.bind("<BackSpace>", lambda _event: self.remove_selected())
         self.bind("<Command-r>", lambda _event: self.refresh_preview())
+
+    def create_menu(self) -> None:
+        menu_bar = tk.Menu(self)
+
+        app_menu = tk.Menu(menu_bar, tearoff=False)
+        app_menu.add_command(label="About ImageStitcher", command=self.show_about)
+        app_menu.add_separator()
+        app_menu.add_command(label="Quit ImageStitcher", command=self.destroy, accelerator="Command-Q")
+        menu_bar.add_cascade(label="ImageStitcher", menu=app_menu)
+
+        file_menu = tk.Menu(menu_bar, tearoff=False)
+        file_menu.add_command(label="Add Images...", command=self.add_images, accelerator="Command-O")
+        file_menu.add_command(label="Save As...", command=self.save_as, accelerator="Command-S")
+        menu_bar.add_cascade(label="File", menu=file_menu)
+
+        self.configure(menu=menu_bar)
+
+    def show_about(self) -> None:
+        messagebox.showinfo(
+            "About ImageStitcher",
+            f"ImageStitcher\nVersion {__version__}\n\n"
+            "Stitch images and PDF pages horizontally or vertically.",
+            parent=self,
+        )
+
+    def configure_drag_and_drop(self) -> None:
+        if not DRAG_AND_DROP_AVAILABLE or DND_FILES is None:
+            self.status.set("Ready. Add Images is available; drag-and-drop support is not installed.")
+            return
+
+        for target in (self, self.tree, self.preview_canvas):
+            target.drop_target_register(DND_FILES)
+            target.dnd_bind("<<DropEnter>>", self.on_drop_enter)
+            target.dnd_bind("<<DropLeave>>", self.on_drop_leave)
+            target.dnd_bind("<<Drop>>", self.on_drop)
+
+        self.status.set("Ready. Drop image files anywhere in the window, or click Add Images.")
+
+    def on_drop_enter(self, event: Any) -> str:
+        self.preview_canvas.configure(background="#edf5ff", highlightbackground="#5b8def", highlightthickness=2)
+        self.status.set("Release to add images in this order.")
+        return event.action
+
+    def on_drop_leave(self, event: Any) -> str:
+        self.reset_drop_highlight()
+        return event.action
+
+    def on_drop(self, event: Any) -> str:
+        self.reset_drop_highlight()
+        paths = parse_drop_paths(event.data, self.tk.splitlist)
+        files = [path for path in paths if path.is_file()]
+        ignored = len(paths) - len(files)
+        if files:
+            self.add_paths(files)
+            if ignored:
+                self.status.set(f"Added {len(files)} image(s); ignored {ignored} non-file item(s).")
+        else:
+            self.status.set("No image files were found in the drop.")
+        return event.action
+
+    def reset_drop_highlight(self) -> None:
+        self.preview_canvas.configure(background="#f7f7f7", highlightbackground="#d6d6d6", highlightthickness=1)
 
     def create_widgets(self) -> None:
         toolbar = ttk.Frame(self, style="Toolbar.TFrame")
@@ -124,7 +201,7 @@ class ImageStitcherApp(tk.Tk):
         header = ttk.Frame(parent)
         header.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(header, text="Images", font=("TkDefaultFont", 14, "bold")).pack(side=tk.LEFT)
-        ttk.Label(header, text="Order saved exactly as listed", style="Muted.TLabel").pack(side=tk.RIGHT)
+        ttk.Label(header, text="Drop files here; order is preserved", style="Muted.TLabel").pack(side=tk.RIGHT)
 
         columns = ("name", "size")
         table = ttk.Frame(parent)
@@ -260,7 +337,7 @@ class ImageStitcherApp(tk.Tk):
             messagebox.showerror("ImageStitcher", f"Could not load images: {exc}")
             return
 
-        self.source_paths.extend(valid)
+        self.source_paths.extend(item.path for item in loaded)
         self.source_items.extend(loaded)
         self.populate_tree()
         self.status.set(f"Loaded {len(self.source_items)} image(s).")
@@ -271,7 +348,7 @@ class ImageStitcherApp(tk.Tk):
             self.tree.delete(row)
         for index, item in enumerate(self.source_items):
             width, height = item.original_size
-            self.tree.insert("", tk.END, iid=str(index), values=(item.path.name, f"{width} x {height}"))
+            self.tree.insert("", tk.END, iid=str(index), values=(item.display_name or item.path.name, f"{width} x {height}"))
 
     def selected_index(self) -> int | None:
         selection = self.tree.selection()
@@ -455,6 +532,7 @@ class ImageStitcherApp(tk.Tk):
                     image=resize_with_quality(item.image, new_size),
                     original_size=item.original_size,
                     scale=item.scale * scale,
+                    display_name=item.display_name,
                 )
             )
 
@@ -479,7 +557,7 @@ class ImageStitcherApp(tk.Tk):
             self.preview_canvas.create_text(
                 canvas_width // 2,
                 canvas_height // 2,
-                text="Add images, choose settings, then click Preview.",
+                text="Drop images here\nor click Add Images",
                 fill="#686868",
                 font=("TkDefaultFont", 14),
             )

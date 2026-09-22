@@ -2,14 +2,15 @@
 
 A lightweight cross-platform image-stitching app with a Tkinter GUI and command-line interface.
 
-It preserves aspect ratios, offers Smart Match resizing for uneven images, previews results, and exports PNG, JPG, or TIFF. No Xcode, Swift, Homebrew, or paid tools are required.
+It preserves aspect ratios, offers Smart Match resizing for uneven images, previews results, and exports PNG, JPG, or TIFF. PDFs are converted page-by-page and can be mixed with image files. No Xcode, Swift, Homebrew, or paid tools are required.
 
 ## Downloads
 
-GitHub Actions produces two installable artifacts:
+GitHub Actions produces three installable artifacts:
 
 - `ImageStitcher.dmg` for macOS.
 - `ImageStitcher-Setup.exe` for 64-bit Windows.
+- `imagestitcher_VERSION_amd64.deb` for Debian, Ubuntu, Linux Mint, and compatible Linux distributions.
 
 Builds are currently unsigned. On macOS, right-click the app and choose `Open` the first time. On Windows, SmartScreen may ask you to confirm the locally built installer.
 
@@ -35,6 +36,8 @@ python3 -m pip install -r requirements.txt
 Dependencies:
 
 - `Pillow` for image processing.
+- `tkinterdnd2` for native drag-and-drop on macOS, Windows, and Linux.
+- `pypdfium2` for bundled PDF page rendering; no Poppler installation is needed.
 - `PyInstaller` for building the `.app`.
 
 ## Run The GUI Directly
@@ -46,7 +49,9 @@ python3 image_stitcher_gui.py
 
 The GUI includes:
 
+- An About ImageStitcher menu showing the installed version
 - Add Images
+- Drop multiple image files directly into the image list, preview, or anywhere in the app window
 - Remove Selected
 - Clear All
 - Move Up / Move Down
@@ -65,7 +70,9 @@ The GUI includes:
 - Estimated output dimensions
 - Save As
 
-In-window drag/drop is not included because built-in Tkinter does not provide reliable native macOS file drop support without extra packages. You can drag files onto the packaged app icon and macOS may pass them into the app.
+Drag-and-drop preserves the Finder/File Explorer/file-manager order supplied by the operating system. A PDF expands into one row per page in page order. PDFs and images can be mixed, and rows can be reordered with Move Up and Move Down before stitching. If the optional drag/drop bridge cannot load, Add Images remains available and the status bar explains the fallback.
+
+PDF pages render at 150 DPI in the GUI. Each PDF is limited to 100 pages and 60 million rendered pixels to prevent accidental memory exhaustion. For a very large PDF, split it into smaller documents first or use the CLI with a lower `--pdf-dpi` value.
 
 ## Run The CLI
 
@@ -99,6 +106,12 @@ Automatically normalize uneven image sizes while preserving proportions:
 
 ```sh
 python3 stitch_images.py horizontal a.jpg b.jpg --smart-match --no-upscale --align center -o matched.png
+```
+
+Stitch all pages of a PDF, with an image after them:
+
+```sh
+python3 stitch_images.py vertical "pages.pdf" "cover.png" --smart-match --no-upscale --pdf-dpi 150 -o combined.png
 ```
 
 Text enhancement:
@@ -225,6 +238,37 @@ dist-windows\ImageStitcher-Setup.exe
 
 If Inno Setup is absent, the script still creates the portable PyInstaller app and explains how to finish the installer.
 
+## Build The Linux Installer
+
+Run this on Debian, Ubuntu, Linux Mint, or a compatible distribution:
+
+```sh
+sudo apt-get update
+sudo apt-get install python3 python3-pip python3-tk dpkg-dev
+chmod +x build_linux.sh
+./build_linux.sh
+```
+
+Output:
+
+```text
+dist-linux/imagestitcher_VERSION_ARCH.deb
+```
+
+Install it with:
+
+```sh
+sudo apt install ./dist-linux/imagestitcher_1.1.0_amd64.deb
+```
+
+After installation, launch ImageStitcher from the desktop application menu or run:
+
+```sh
+imagestitcher
+```
+
+The GitHub Linux build uses Ubuntu 22.04 for broader `glibc` compatibility with newer Debian/Ubuntu-family systems. Linux packages are architecture-specific.
+
 ## Tests
 
 ```sh
@@ -241,7 +285,7 @@ The repository includes:
 - `.gitignore` for Python and package outputs.
 - Tests for Smart Match resizing and JPG transparency flattening.
 - A cross-platform test workflow for macOS, Windows, and Linux.
-- An installer workflow that builds macOS DMG and Windows Setup EXE artifacts.
+- An installer workflow that builds macOS DMG, Windows Setup EXE, and Linux DEB artifacts.
 
 Create a repository and push it:
 
@@ -263,7 +307,7 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-Manual workflow runs place installers in the workflow's `Artifacts` section. Pushing a `v*` tag also creates a GitHub Release and attaches both installers automatically. Code signing can be added later once Apple and Windows signing certificates are available.
+Manual workflow runs place installers in the workflow's `Artifacts` section. Pushing a `v*` tag also creates a GitHub Release and attaches all three installers automatically. Code signing can be added later once Apple and Windows signing certificates are available.
 
 Local macOS packages use the architecture of the Python/Pillow installation that builds them. The included local DMG is Apple-silicon (`arm64`). Build on an Intel Mac or the GitHub macOS runner when an Intel package is needed.
 
@@ -315,6 +359,7 @@ Accepted extensions:
 - `.heif`
 - `.tif`
 - `.tiff`
+- `.pdf` (all pages render to images first)
 
 JPG, PNG, TIFF, and WEBP usually work with Pillow. HEIC depends on the installed Pillow/macOS image libraries. If HEIC does not open, convert it to PNG or JPG first.
 
@@ -353,6 +398,22 @@ Use fewer images, add `--max-width`, add `--max-height`, or turn on `--no-upscal
 Windows cannot find Inno Setup.
 
 Install Inno Setup 6 and rerun `build_windows.bat`. The portable app in `dist\ImageStitcher` remains usable even without the installer.
+
+Drag-and-drop is unavailable when running from source.
+
+Reinstall all dependencies, then restart the app:
+
+```sh
+python3 -m pip install -r requirements.txt
+```
+
+Linux reports a missing Tk or display library.
+
+Install the desktop prerequisites and rebuild:
+
+```sh
+sudo apt-get install python3-tk libx11-6 libxext6 libxrender1 libxft2 libfontconfig1
+```
 
 ## License
 
